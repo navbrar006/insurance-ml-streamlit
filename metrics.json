@@ -1,0 +1,13 @@
+{
+  "r2": 0.9003776980728558,
+  "mae": 2014.1006863479518,
+  "rmse": 4278.574773548551,
+  "best_params": {
+    "regressor__model__n_estimators": 600,
+    "regressor__model__min_samples_split": 5,
+    "regressor__model__min_samples_leaf": 2,
+    "regressor__model__max_depth": 25
+  },
+  "train_records": 1069,
+  "test_records": 268
+}

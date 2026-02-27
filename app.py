@@ -5,7 +5,7 @@ import shap
 import matplotlib.pyplot as plt
 import numpy as np
 import json
-import os
+from pathlib import Path
 
 from model.features import feature_engineering
 
@@ -17,25 +17,37 @@ st.title("💰 Insurance Charges Predictor")
 st.caption("Advanced ML model with lifestyle & risk-based feature engineering + Explainable AI")
 
 # ==============================
-# Load model + metrics (cached)
+# Paths (works on Streamlit Cloud too)
+# ==============================
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "insurance_model.pkl"
+METRICS_PATH = BASE_DIR / "metrics.json"
+
+# ==============================
+# Load model + metrics
 # ==============================
 @st.cache_resource
 def load_model():
-    return joblib.load("insurance_model.pkl")
+    return joblib.load(MODEL_PATH)
 
-@st.cache_data
 def load_metrics():
-    if os.path.exists("metrics.json"):
-        with open("metrics.json", "r") as f:
+    if METRICS_PATH.exists():
+        with open(METRICS_PATH, "r") as f:
             return json.load(f)
     return None
 
 model = load_model()
 metrics = load_metrics()
 
-# Sidebar: model performance
+# ==============================
+# Sidebar: Model performance
+# ==============================
 with st.sidebar:
     st.header("📌 Model Info")
+    # Quick debug (optional)
+    # st.caption(f"metrics exists: {METRICS_PATH.exists()}")
+    # st.caption(f"Files: {[p.name for p in BASE_DIR.iterdir()]}")
+
     if metrics:
         st.write(f"**R²:** {metrics.get('r2', 'NA'):.4f}")
         st.write(f"**MAE:** {metrics.get('mae', 'NA'):.2f}")
@@ -53,16 +65,13 @@ def unwrap_model(m):
     """
     Returns: (pipeline, rf_model, preprocessor)
     """
-    # Case 1: TransformedTargetRegressor -> has .regressor_
     if hasattr(m, "regressor_"):
         pipe = m.regressor_
-    # Case 2: saved fitted TransformedTargetRegressor might store .regressor
     elif hasattr(m, "regressor"):
         pipe = m.regressor
     else:
-        pipe = m  # assume pipeline
+        pipe = m
 
-    # Extract steps safely
     pre = pipe.named_steps.get("preprocessor", None)
     rf = pipe.named_steps.get("model", None)
     return pipe, rf, pre
@@ -82,14 +91,12 @@ weight = st.number_input("Weight (kg)", min_value=20.0, max_value=200.0, value=7
 height_feet = st.number_input("Height (feet)", min_value=3, max_value=8, value=5)
 height_inches = st.number_input("Height (inches)", min_value=0, max_value=11, value=7)
 
-# Convert height to meters
 height_m = (height_feet * 12 + height_inches) * 0.0254
 if height_m <= 0:
     st.error("Invalid height. Please enter a valid height.")
     st.stop()
 
 bmi = weight / (height_m ** 2)
-
 st.write(f"Calculated BMI: **{bmi:.2f}**")
 
 children = st.number_input("Number of Children", 0, 5, 0)
@@ -137,9 +144,6 @@ def make_input_df(age, sex, bmi, children, smoker, region):
     }])
     return feature_engineering(df)
 
-# ==============================
-# What-if analysis helper
-# ==============================
 def predict_for(df):
     return float(model.predict(df)[0])
 
@@ -149,43 +153,30 @@ def predict_for(df):
 if st.button("Predict Insurance Charges"):
     input_df = make_input_df(age, sex, bmi, children, smoker, region)
 
-    # Prediction
     prediction = predict_for(input_df)
     st.success(f"💰 Estimated Insurance Charges: ₹ {prediction:,.2f}")
 
-    # Risk insights
     st.subheader("🧠 Risk Insights")
     st.write(f"**Lifestyle Risk Score:** {input_df['Lifestyle_Risk_Score'].values[0]:.2f}")
 
     # -----------------------------
-    # What-if Analysis (High impact)
+    # What-if Analysis
     # -----------------------------
     st.subheader("🔁 What-if Analysis (How to reduce cost?)")
-
     col1, col2 = st.columns(2)
 
-    # What if smoker = no
     with col1:
         df_non_smoker = make_input_df(age, sex, bmi, children, "no", region)
         pred_non_smoker = predict_for(df_non_smoker)
         st.write("If you **stop smoking**:")
-        st.metric(
-            label="Estimated Charges",
-            value=f"₹ {pred_non_smoker:,.2f}",
-            delta=f"₹ {pred_non_smoker - prediction:,.2f}"
-        )
+        st.metric("Estimated Charges", f"₹ {pred_non_smoker:,.2f}", f"₹ {pred_non_smoker - prediction:,.2f}")
 
-    # What if BMI decreases
     with col2:
         bmi_reduced = max(12.0, bmi - 2.0)
         df_bmi_reduce = make_input_df(age, sex, bmi_reduced, children, smoker, region)
         pred_bmi_reduce = predict_for(df_bmi_reduce)
         st.write("If your **BMI reduces by 2**:")
-        st.metric(
-            label="Estimated Charges",
-            value=f"₹ {pred_bmi_reduce:,.2f}",
-            delta=f"₹ {pred_bmi_reduce - prediction:,.2f}"
-        )
+        st.metric("Estimated Charges", f"₹ {pred_bmi_reduce:,.2f}", f"₹ {pred_bmi_reduce - prediction:,.2f}")
 
     # -----------------------------
     # Explainable AI (SHAP)
@@ -200,10 +191,9 @@ if st.button("Predict Insurance Charges"):
     shap_values = explainer.shap_values(X_transformed)
 
     feature_names = preprocessor.get_feature_names_out()
-
     shap_df = pd.DataFrame(shap_values, columns=feature_names)
-    shap_series = shap_df.iloc[0]
 
+    shap_series = shap_df.iloc[0]
     abs_shap = shap_series.abs()
     shap_percent = (abs_shap / abs_shap.sum()) * 100
     top_features = shap_percent.sort_values(ascending=False).head(5)
@@ -214,7 +204,7 @@ if st.button("Predict Insurance Charges"):
     })
 
     st.write("### 🔑 Main Factors Influencing Charges (%)")
-    st.dataframe(readable_table, use_container_width=True)
+    st.dataframe(readable_table, width="stretch")
 
     main_feature = top_features.index[0]
     st.success(
